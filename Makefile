@@ -1,15 +1,15 @@
-CC=g++
-CFLAGS= -g -Wall 
+CC = gcc
+CFLAGS = -g -Wall `pkg-config --cflags gtk+-3.0` -pthread
+LDFLAGS = `pkg-config --libs gtk+-3.0` -L/usr/lib/x86_64-linux-gnu -lpthread
 
 all: proxy
 
-proxy: proxy_server_with_cache.c
-	$(CC) $(CFLAGS) -o proxy_parse.o -c proxy_parse.c -lpthread
-	$(CC) $(CFLAGS) -o proxy.o -c proxy_server_with_cache.c -lpthread
-	$(CC) $(CFLAGS) -o proxy proxy_parse.o proxy.o -lpthread
+proxy: updated_proxy.c
+	$(CC) $(CFLAGS) -o proxy.o -c updated_proxy.c
+	$(CC) $(CFLAGS) -o proxy proxy.o $(LDFLAGS)
 
 clean:
 	rm -f proxy *.o
 
 tar:
-	tar -cvzf ass1.tgz proxy_server_with_cache.c README Makefile proxy_parse.c proxy_parse.h
+	tar -cvzf ass1.tgz updated_proxy.c README Makefile
