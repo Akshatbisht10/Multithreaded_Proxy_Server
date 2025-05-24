@@ -1,0 +1,37 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "type": "cppbuild",
+            "label": "C/C++: gcc build active file",
+            "command": "/usr/bin/gcc",
+            "args": [
+                "-fdiagnostics-color=always",
+                "-g",
+                "${file}",
+                "-o",
+                "${fileDirname}/${fileBasenameNoExtension}",
+                "-lpthread",                // pthreads for multi-threading
+                "-lssl",                    // SSL support
+                "-lcrypto",                 // Crypto support
+                "-lgtk-3",                  // GTK 3 support
+                "-I/usr/include/gtk-3.0",   // Include GTK 3 headers
+                "-I/usr/include/pango-1.0", // Include Pango headers
+                "-I/usr/include/cairo",     // Include Cairo headers
+                "-I/usr/include/atk-1.0",   // Include ATK headers
+                "-I/usr/include/gdk-pixbuf-2.0" // Include Gdk-Pixbuf headers
+            ],
+            "options": {
+                "cwd": "${fileDirname}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "detail": "compiler: /usr/bin/gcc",
+        }
+    ]
+}

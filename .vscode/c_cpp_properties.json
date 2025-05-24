@@ -1,0 +1,37 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/usr/include/gtk-3.0",              // GTK header directory
+                "/usr/include/pango-1.0",            // Pango header directory
+                "/usr/include/glib-2.0",             // GLib header directory
+                "/usr/lib/x86_64-linux-gnu/glib-2.0/include", // GLib 2.0 include directory
+                "/usr/include/harfbuzz",             // HarfBuzz header directory
+                "/usr/include/freetype2",            // Freetype header directory
+                "/usr/include/libpng16",             // libpng header directory
+                "/usr/include/libmount",             // libmount header directory
+                "/usr/include/blkid",                // blkid header directory
+                "/usr/include/fribidi",              // Fribidi header directory
+                "/usr/include/cairo",                // Cairo header directory
+                "/usr/include/pixman-1",             // Pixman header directory
+                "/usr/include/gdk-pixbuf-2.0",       // GDK-Pixbuf header directory
+                "/usr/include/x86_64-linux-gnu",    // Architecture-specific includes
+                "/usr/include/webp",                // WebP header directory
+                "/usr/include/gio-unix-2.0",         // GIO header directory
+                "/usr/include/atk-1.0",              // ATK header directory
+                "/usr/include/at-spi2-atk/2.0",      // AT-SPI 2 ATK header directory
+                "/usr/include/at-spi-2.0",           // AT-SPI header directory
+                "/usr/include/dbus-1.0",             // DBus header directory
+                "/usr/lib/x86_64-linux-gnu/dbus-1.0/include" // DBus include directory
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "c17",
+            "cppStandard": "gnu++17",
+            "intelliSenseMode": "linux-gcc-x64"
+        }
+    ],
+    "version": 4
+}
