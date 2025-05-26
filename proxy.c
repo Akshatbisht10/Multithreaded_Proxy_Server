@@ -13,17 +13,64 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <sys/select.h>
+#include <stdbool.h>
 
 #define PORT 8080
 #define BUFFER_SIZE 8192
 
 // Utility: Build cache key for GET/POST
 void build_cache_key(const char *method, const char *url, const char *body, char *key, size_t keysize) {
-    if (strcmp(method, "POST") == 0) {
-        snprintf(key, keysize, "%s %s %s", method, url, body ? body : "");
+    char normalized_url[1024] = {0};
+    char host[512] = {0};
+    char path[1024] = "/";
+    int port = 80;
+    
+    printf("[URL DEBUG] Original URL: %s\n", url);
+    
+    // Parse URL into components
+    if (strncmp(url, "http://", 7) == 0) {
+        const char *host_start = url + 7;
+        const char *path_start = strchr(host_start, '/');
+        if (path_start) {
+            size_t host_len = path_start - host_start;
+            if (host_len >= sizeof(host)) host_len = sizeof(host) - 1;
+            strncpy(host, host_start, host_len);
+            host[host_len] = '\0';
+            strncpy(path, path_start, sizeof(path) - 1);
+        } else {
+            strncpy(host, host_start, sizeof(host) - 1);
+            strcpy(path, "/");
+        }
     } else {
-        snprintf(key, keysize, "%s %s", method, url);
+        // If no http:// prefix, treat the entire URL as the host
+        const char *path_start = strchr(url, '/');
+        if (path_start) {
+            size_t host_len = path_start - url;
+            if (host_len >= sizeof(host)) host_len = sizeof(host) - 1;
+            strncpy(host, url, host_len);
+            host[host_len] = '\0';
+            strncpy(path, path_start, sizeof(path) - 1);
+        } else {
+            strncpy(host, url, sizeof(host) - 1);
+            strcpy(path, "/");
+        }
     }
+    
+    // Build normalized URL (host + path)
+    snprintf(normalized_url, sizeof(normalized_url), "%s%s", host, path);
+    printf("[URL DEBUG] Normalized URL: %s\n", normalized_url);
+    
+    // Build final cache key
+    if (strcmp(method, "GET") == 0) {
+        strncpy(key, normalized_url, keysize - 1);
+        key[keysize - 1] = '\0';
+    } else if (strcmp(method, "POST") == 0) {
+        snprintf(key, keysize, "%s %s", normalized_url, body ? body : "");
+    } else {
+        snprintf(key, keysize, "%s %s", method, normalized_url);
+    }
+    
+    printf("[URL DEBUG] Final cache key: %s\n", key);
 }
 
 // Check if the host is blocked
@@ -106,11 +153,53 @@ void *handle_client(void *arg) {
         return NULL;
     }
 
-    // Log the request
+    // Log the request with cache status
     char logbuf[2048];
-    snprintf(logbuf, sizeof(logbuf), "[+] Method: %s | URL: %s | Protocol: %s", method, url, protocol);
-    char *msg = strdup(logbuf);
-    g_idle_add(log_message_idle, msg);
+    char cache_status[32];
+
+    // Build normalized cache key
+    char cache_key[BUFFER_SIZE * 2];
+    char *body = NULL;
+    
+    // Skip caching for CONNECT requests
+    bool should_cache = (strcmp(method, "CONNECT") != 0);
+    
+    if (should_cache) {
+        if (strcmp(method, "POST") == 0) {
+            char *body_start = strstr(buffer, "\r\n\r\n");
+            if (body_start) {
+                body = body_start + 4;
+            } else {
+                body = "";
+            }
+            build_cache_key(method, url, body, cache_key, sizeof(cache_key));
+        } else {
+            build_cache_key(method, url, NULL, cache_key, sizeof(cache_key));
+        }
+
+        // Check cache first
+        char *cached_response = find_in_cache(cache_key);
+        if (cached_response) {
+            strcpy(cache_status, "CACHE_HIT");
+            // Create combined log message
+            snprintf(logbuf, sizeof(logbuf), "%s %s %s | %s", method, url, protocol, cache_status);
+            char *request_msg = strdup(logbuf);
+            g_idle_add(log_message_idle, request_msg);
+
+            send(client_socket, cached_response, strlen(cached_response), 0);
+            free(cached_response);
+            close(client_socket);
+            return NULL;
+        }
+        strcpy(cache_status, "CACHE_MISS");
+    } else {
+        strcpy(cache_status, "CONNECT");
+    }
+
+    // Create combined log message
+    snprintf(logbuf, sizeof(logbuf), "%s %s %s | %s", method, url, protocol, cache_status);
+    char *request_msg = strdup(logbuf);
+    g_idle_add(log_message_idle, request_msg);
 
     // Handle HTTPS requests (CONNECT method)
     if (strcmp(method, "CONNECT") == 0) {
@@ -182,31 +271,6 @@ void *handle_client(void *arg) {
         return NULL;
     }
 
-    // Build normalized cache key
-    char cache_key[BUFFER_SIZE * 2];
-    char *body = NULL;
-    if (strcmp(method, "POST") == 0) {
-        char *body_start = strstr(buffer, "\r\n\r\n");
-        if (body_start) {
-            body = body_start + 4;
-        } else {
-            body = "";
-        }
-        build_cache_key(method, url, body, cache_key, sizeof(cache_key));
-    } else {
-        build_cache_key(method, url, NULL, cache_key, sizeof(cache_key));
-    }
-
-    // Cache check
-    char *cached_response = find_in_cache(cache_key);
-    if (cached_response) {
-        log_cache_event(cache_key, 1);
-        send(client_socket, cached_response, strlen(cached_response), 0);
-        close(client_socket);
-        return NULL;
-    }
-    log_cache_event(cache_key, 0);
-
     int remote_socket = connect_to_host(host, port);
     if (remote_socket < 0) {
         close(client_socket);
@@ -224,25 +288,97 @@ void *handle_client(void *arg) {
     }
     send(remote_socket, request, strlen(request), 0);
 
-    // Receive response and forward to client, also cache
-    int response_size = BUFFER_SIZE * 10;
-    char *response = malloc(response_size); // up to ~80KB
+    // Only set up caching for non-CONNECT requests
+    char *response = NULL;
+    size_t response_capacity = BUFFER_SIZE * 2;  // Start with 16KB
     int offset = 0;
-    while ((bytes_received = recv(remote_socket, buffer, BUFFER_SIZE, 0)) > 0) {
-        send(client_socket, buffer, bytes_received, 0);
-        if (offset + bytes_received < response_size) {
-            memcpy(response + offset, buffer, bytes_received);
-            offset += bytes_received;
+    bool headers_complete = false;
+    bool is_success = false;
+
+    if (should_cache) {
+        response = malloc(response_capacity);
+        if (!response) {
+            close(client_socket);
+            close(remote_socket);
+            return NULL;
         }
     }
-    if (offset > 0) {
-        response[offset] = '\0';
+
+    // Set socket timeout to make reads faster
+    struct timeval tv;
+    tv.tv_sec = 2;  // 2 seconds timeout
+    tv.tv_usec = 0;
+    setsockopt(remote_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
+
+    // Use select() for non-blocking reads
+    fd_set readfds;
+    struct timeval timeout;
+    int ready;
+
+    while (1) {
+        FD_ZERO(&readfds);
+        FD_SET(remote_socket, &readfds);
+        
+        timeout.tv_sec = 1;
+        timeout.tv_usec = 0;
+        
+        ready = select(remote_socket + 1, &readfds, NULL, NULL, &timeout);
+        if (ready <= 0) break;  // Timeout or error
+        
+        bytes_received = recv(remote_socket, buffer, BUFFER_SIZE, 0);
+        if (bytes_received <= 0) break;
+
+        // Forward to client immediately
+        send(client_socket, buffer, bytes_received, 0);
+        
+        // Process for caching if needed
+        if (should_cache && response) {
+            // Check if we need to grow the buffer
+            while (offset + bytes_received >= response_capacity) {
+                size_t new_capacity = response_capacity * 2;
+                char *new_response = realloc(response, new_capacity);
+                if (!new_response) {
+                    printf("[CACHE DEBUG] Failed to grow buffer to %zu bytes\n", new_capacity);
+                    free(response);
+                    response = NULL;
+                    goto cleanup;
+                }
+                response = new_response;
+                response_capacity = new_capacity;
+                printf("[CACHE DEBUG] Grew buffer to %zu bytes\n", response_capacity);
+            }
+            
+            // Copy new data
+            memcpy(response + offset, buffer, bytes_received);
+            offset += bytes_received;
+            response[offset] = '\0';
+            
+            // Check headers on first chunk
+            if (!headers_complete && strstr(response, "\r\n\r\n")) {
+                headers_complete = true;
+                if (strstr(response, "HTTP/1.1 200") || strstr(response, "HTTP/1.0 200")) {
+                    is_success = true;
+                    printf("[CACHE DEBUG] Got successful response, continuing to cache\n");
+                } else {
+                    printf("[CACHE DEBUG] Not a 200 response, stopping cache\n");
+                    free(response);
+                    response = NULL;
+                    goto cleanup;
+                }
+            }
+        }
+    }
+
+    // Cache if we have a complete successful response
+    if (should_cache && response && offset > 0 && is_success) {
+        printf("[CACHE DEBUG] Caching response of size: %d bytes\n", offset);
         add_to_cache(cache_key, response);
     }
-    free(response);
 
-    close(client_socket);
+cleanup:
+    if (response) free(response);
     close(remote_socket);
+    close(client_socket);
     return NULL;
 }
 
